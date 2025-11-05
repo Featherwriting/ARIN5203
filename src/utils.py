@@ -447,3 +447,66 @@ def plot_result_given_q(
             chosen_idx=chosen_idx,
             start_answer_token=tokenizer.tokenize(assistant_tag)[-1],
         )
+
+def get_confidence_scores(
+    completion: str,
+    tokenizer,
+    model,
+    rep_reader,
+    rep_pipeline,
+    hidden_layers,
+    layers,
+    THRESHOLD: float = 0.0,
+    assistant_tag: str = "[/INST]"
+) -> dict:
+    """
+    分析生成文本的 token 级 confidence 分数
+    """
+    input_ids = tokenizer.tokenize(completion)
+    words = [t.replace("▁", " ") for t in input_ids]
+
+    # 定位 assistant_tag 结束位置
+    try:
+        start_idx = next(i for i, t in enumerate(input_ids) if assistant_tag in t) + 1
+    except:
+        start_idx = len(input_ids) - 100
+
+    results = []
+    for pos in range(start_idx, len(input_ids)):
+        rel_pos = pos - len(input_ids)
+        out = rep_pipeline(
+            [completion],
+            rep_reader=rep_reader,
+            rep_token=rel_pos,
+            hidden_layers=hidden_layers,
+        )
+        results.append(out)
+
+    scores = []
+    for pos in range(len(results)):
+        layer_vals = [
+            results[pos][0][layer][0] * rep_reader.direction_signs[layer][0]
+            for layer in layers
+        ]
+        scores.append(float(np.mean(layer_vals) - THRESHOLD))
+
+    tokens = [t.strip() for t in words[start_idx:] if t.strip()]
+    min_len = min(len(tokens), len(scores))
+    tokens = tokens[:min_len]
+    scores = scores[:min_len]
+
+    avg = float(np.mean(scores)) if scores else 0.0
+    low_conf = [i for i, s in enumerate(scores) if s < -0.5]
+
+    return {
+        "tokens": tokens,
+        "confidence_scores": scores,
+        "stats": {
+            "average_confidence": avg,
+            "min_confidence": float(np.min(scores)) if scores else 0.0,
+            "low_confidence_count": len(low_conf),
+            "low_confidence_tokens": [
+                {"token": tokens[i], "score": scores[i]} for i in low_conf[:5]
+            ]
+        }
+    }

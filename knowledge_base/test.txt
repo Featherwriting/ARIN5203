@@ -1,0 +1,20 @@
+# Sample Knowledge Base for Testing RAG Hallucinations
+
+## Topic: History of Ancient Rome
+
+### Key Facts:
+- Julius Caesar was assassinated on the Ides of March, 44 BC, by senators including Brutus and Cassius.
+- The Roman Empire officially began in 27 BC when Octavian became Augustus.
+- The Colosseum was completed in AD 80 under Emperor Titus.
+- Romulus founded Rome in 753 BC according to legend.
+
+### Famous Figures:
+- Augustus: First Roman Emperor, known for the Pax Romana.
+- Nero: Emperor infamous for the Great Fire of Rome in AD 64, though evidence of him fiddling is a myth.
+- Cleopatra: Egyptian queen, allied with Caesar and Mark Antony, died by suicide in 30 BC.
+
+### Events:
+- Punic Wars: Three wars between Rome and Carthage (264-146 BC). Hannibal crossed the Alps with elephants during the Second Punic War.
+- Fall of the Western Roman Empire: In AD 476, when Odoacer deposed Romulus Augustulus.
+
+No mentions of fictional events like 'The Great Roman Pizza Festival' or modern inventions in ancient times.
