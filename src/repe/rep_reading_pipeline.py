@@ -1,7 +1,9 @@
+import logging
 from typing import List, Union, Optional
 
 import numpy as np
 import torch
+from tqdm.auto import tqdm
 from transformers import Pipeline
 
 from .rep_readers import DIRECTION_FINDERS, RepReader
@@ -11,6 +13,7 @@ class RepReadingPipeline(Pipeline):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.logger = logging.getLogger(__name__)
 
     def _get_hidden_states(
             self,
@@ -93,19 +96,50 @@ class RepReadingPipeline(Pipeline):
         return rep_reader.transform(hidden_states, hidden_layers, component_index)
 
     def _batched_string_to_hiddens(self, train_inputs, rep_token, hidden_layers, batch_size, which_hidden_states,
-                                   **tokenizer_args):
+                                   show_progress=False, verbose: bool = False, **tokenizer_args):
         """
         Returns:
         - A dictionary where keys are layer numbers and values are the corresponding hidden states.
         """
         # Wrapper method to get a dictionary hidden states from a list of strings
-        hidden_states_outputs = self(train_inputs, rep_token=rep_token,
-                                     hidden_layers=hidden_layers, batch_size=batch_size, rep_reader=None,
-                                     which_hidden_states=which_hidden_states, **tokenizer_args)
+        if isinstance(train_inputs, str):
+            train_inputs = [train_inputs]
+        elif not isinstance(train_inputs, list):
+            train_inputs = list(train_inputs)
+
+        total_samples = len(train_inputs)
+        progress_bar = None
+        if show_progress:
+            progress_bar = tqdm(total=total_samples, desc="Collecting hidden states")
+
+        if verbose:
+            self.logger.info(
+                "Accumulating hidden states (samples=%s, batch_size=%s, layers=%d)",
+                total_samples,
+                batch_size,
+                len(hidden_layers),
+            )
+
         hidden_states = {layer: [] for layer in hidden_layers}
-        for hidden_states_batch in hidden_states_outputs:
-            for layer in hidden_states_batch:
-                hidden_states[layer].extend(hidden_states_batch[layer])
+        step = batch_size if batch_size and batch_size > 0 else max(1, total_samples)
+        indices = range(0, total_samples, step)
+
+        for start in indices:
+            batch_inputs = train_inputs[start:start + step]
+            hidden_states_outputs = self(batch_inputs, rep_token=rep_token,
+                                         hidden_layers=hidden_layers, batch_size=batch_size, rep_reader=None,
+                                         which_hidden_states=which_hidden_states, **tokenizer_args)
+            for hidden_states_batch in hidden_states_outputs:
+                for layer in hidden_states_batch:
+                    hidden_states[layer].extend(hidden_states_batch[layer])
+            if progress_bar is not None:
+                progress_bar.update(len(batch_inputs))
+
+        if progress_bar is not None:
+            progress_bar.close()
+
+        if verbose:
+            self.logger.info("Completed hidden state accumulation.")
         return {k: np.vstack(v) for k, v in hidden_states.items()}
 
     def _validate_params(self, n_difference, direction_method):
@@ -124,6 +158,8 @@ class RepReadingPipeline(Pipeline):
             direction_method: str = 'pca',
             direction_finder_kwargs: dict = {},
             which_hidden_states: Optional[str] = None,
+            show_progress: bool = True,
+            verbose: bool = True,
             **tokenizer_args, ):
         """Train a RepReader on the training data.
         Args:
@@ -149,8 +185,10 @@ class RepReadingPipeline(Pipeline):
         if direction_finder.needs_hiddens:
             # get raw hidden states for the train inputs
             hidden_states = self._batched_string_to_hiddens(train_inputs, rep_token, hidden_layers, batch_size,
-                                                            which_hidden_states,
+                                                            which_hidden_states, show_progress, verbose,
                                                             **tokenizer_args)
+            if verbose:
+                self.logger.info("Computing relative hidden states (n_difference=%d)", n_difference)
 
             # get differences between pairs
             relative_hidden_states = {k: np.copy(v) for k, v in
@@ -160,6 +198,8 @@ class RepReadingPipeline(Pipeline):
                         n_difference):
                     relative_hidden_states[layer] = relative_hidden_states[layer][::2] - relative_hidden_states[layer][
                         1::2]
+            if verbose:
+                self.logger.info("Relative hidden states ready for %d layers.", len(hidden_layers))
 
         direction_finder.directions = direction_finder.get_rep_directions(
             self.model, self.tokenizer, relative_hidden_states, hidden_layers,
@@ -172,5 +212,8 @@ class RepReadingPipeline(Pipeline):
         if train_labels is not None:
             direction_finder.direction_signs = direction_finder.get_signs(
                 hidden_states, train_labels, hidden_layers)
+
+        if verbose:
+            self.logger.info("Finished training RepReader using method '%s'.", direction_method)
 
         return direction_finder
