@@ -191,19 +191,28 @@ class RepReadingPipeline(Pipeline):
                 self.logger.info("Computing relative hidden states (n_difference=%d)", n_difference)
 
             # get differences between pairs
-            relative_hidden_states = {k: np.copy(v) for k, v in
-                                      hidden_states.items()}
-            for layer in hidden_layers:
-                for _ in range(
-                        n_difference):
-                    relative_hidden_states[layer] = relative_hidden_states[layer][::2] - relative_hidden_states[layer][
-                        1::2]
+            relative_hidden_states = {k: np.copy(v) for k, v in hidden_states.items()}
+
+            layer_iterator = hidden_layers
+            progress_bar = None
+            if show_progress:
+                progress_bar = tqdm(hidden_layers, desc="Pairwise diffs", leave=False)
+                layer_iterator = progress_bar
+
+            for layer in layer_iterator:
+                layer_values = relative_hidden_states[layer]
+                for _ in range(n_difference):
+                    layer_values = layer_values[::2] - layer_values[1::2]
+                relative_hidden_states[layer] = layer_values
+
+            if progress_bar is not None:
+                progress_bar.close()
             if verbose:
                 self.logger.info("Relative hidden states ready for %d layers.", len(hidden_layers))
 
         direction_finder.directions = direction_finder.get_rep_directions(
             self.model, self.tokenizer, relative_hidden_states, hidden_layers,
-            train_choices=train_labels)
+            train_choices=train_labels, show_progress=show_progress)
         for layer in direction_finder.directions:
             if type(direction_finder.directions[layer]) == np.ndarray:
                 direction_finder.directions[layer] = direction_finder.directions[layer].astype(

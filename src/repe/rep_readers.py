@@ -4,6 +4,7 @@ from itertools import islice
 import numpy as np
 import torch
 from sklearn.decomposition import PCA
+from tqdm.auto import tqdm
 
 
 def project_onto_direction(H, direction):
@@ -149,9 +150,16 @@ class PCARepReader(RepReader):
 
     def get_rep_directions(self, model, tokenizer, hidden_states, hidden_layers, **kwargs):
         """Get PCA components for each layer"""
+        show_progress = kwargs.pop('show_progress', False)
         directions = {}
 
-        for layer in hidden_layers:
+        layer_iterator = hidden_layers
+        progress_bar = None
+        if show_progress:
+            progress_bar = tqdm(hidden_layers, desc="Training PCA directions", leave=False)
+            layer_iterator = progress_bar
+
+        for layer in layer_iterator:
             H_train = hidden_states[layer]
             H_train_mean = H_train.mean(axis=0, keepdims=True)
             self.H_train_means[layer] = H_train_mean
@@ -163,6 +171,9 @@ class PCARepReader(RepReader):
             # shape (n_components, n_features)
             directions[layer] = pca_model.components_
             self.n_components = pca_model.n_components_
+
+        if progress_bar is not None:
+            progress_bar.close()
 
         return directions
 
@@ -216,7 +227,7 @@ class ClusterMeanRepReader(RepReader):
         super().__init__()
 
     def get_rep_directions(self, model, tokenizer, hidden_states, hidden_layers, **kwargs):
-
+        show_progress = kwargs.pop('show_progress', False)
         # train labels is necessary to differentiate between different classes
         train_choices = kwargs['train_choices'] if 'train_choices' in kwargs else None
         assert train_choices is not None, "ClusterMeanRepReader requires train_choices to differentiate two clusters"
@@ -229,13 +240,22 @@ class ClusterMeanRepReader(RepReader):
         pos_class = np.where(train_choices == 1)
 
         directions = {}
-        for layer in hidden_layers:
+        layer_iterator = hidden_layers
+        progress_bar = None
+        if show_progress:
+            progress_bar = tqdm(hidden_layers, desc="Training cluster directions", leave=False)
+            layer_iterator = progress_bar
+
+        for layer in layer_iterator:
             H_train = np.array(hidden_states[layer])
 
             H_pos_mean = H_train[pos_class].mean(axis=0, keepdims=True)
             H_neg_mean = H_train[neg_class].mean(axis=0, keepdims=True)
 
             directions[layer] = H_pos_mean - H_neg_mean
+
+        if progress_bar is not None:
+            progress_bar.close()
 
         return directions
 
